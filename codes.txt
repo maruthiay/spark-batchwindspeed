@@ -1,0 +1,187 @@
+16:137:602:900C
+Introduction to Cloud and Big Data Systems (Spring 2017)
+
+Assignment 3
+Maruthi Ayyappan – Aishwarya Gunde – Beethoven Plaisir
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+--> Input generation 
+This is the input generation code
+ma1306@ip-172-31-72-124:~/sparkas$ cat in_gen.py
+import random # importing random to generate random values of Z(wind speed)
+f = open("test.txt", "w")
+for x in range(1,51): # range taken for X values
+        for y in range(1,51): # range taken for Y values
+                i = random.randint(0,50) # Assigning randomly 1 in 50 values as 'null' or 'none'
+                if (i==5):
+                        z = None
+                        f.write("%i, %i, %s\n" %(x, y, z))
+                else:
+                        z = random.randint(-115,115) # Range of Z values(wind speed)
+                        f.write("%i, %i, %i\n" % (x, y, z))
+f.close()
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Running above python script
+
+--> ma1306@ip-172-31-72-124:~/sparkas$ python in_gen.py
+ma1306@ip-172-31-72-124:~/sparkas$
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Keeping the file getting generated in HDFS
+
+---> ma1306@ip-172-31-72-124:~/sparkas$ hdfs dfs -put test.txt
+ma1306@ip-172-31-72-124:~/sparkas$
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Spark application code for generating new Z
+
+---> ma1306@ip-172-31-72-124:~/sparkas$ cat meth.py
+import sys
+from pyspark.sql import SparkSession
+
+#Spark session Builder
+spark = SparkSession\
+        .builder\
+        .appName("Python_Wind_Map")\
+        .getOrCreate()
+
+# Function of Calculation of New Wind Speed
+def updatenewwind(w):
+        x = int(w[0])
+        y = int(w[1])
+        z = (w[2])
+        zprev  = (getnewz(updlist, (x-1), y)) # Gets Z(x-1,y)
+        znext = (getnewz(updlist, (x+1), y)) # Gets Z(x+1,y)
+        if z is not None: # If else if statements to calculate new Z from first record to last record in the RDD Stream
+                if zprev is not None and znext is not None:
+                        znew = alpha*float(zprev) + (1-2*alpha)*float(z) + alpha*float(znext)
+                elif zprev is None and znext is not None:
+                        znew = (1-alpha)*float(z) + alpha*float(znext)
+                elif zprev is not None and znext is None:
+                        znew = alpha*float(zprev) + (1-alpha)*float(z)
+                else:
+                        znew = float(z)
+        else: z = 0
+        return [x,y,znew]
+
+# Function to Get Z value for calculation above
+def getnewz(thislist,x,y):
+        for i in thislist:
+                if int(i[0]) == x and int(i[1]) == y:
+                        return i[2]
+        return None
+# Printing function for easy viewing
+def printing(printlist, j, nl, fl):
+        of = "outputs/alpha1/out_%i.txt" %j # Output of [x y znew] used later for heatmap
+        pf = "outputs/alpha1/outalpha1.txt" # Output of number of Nulls and Filtered values in each iteration.
+        f= open(of, "w")
+        pff = open(pf, "a")
+        pff.write(" The number of null values in out_%i.txt %i\n" %(j ,nl))
+        pff.write(" The number of filtered values in out_%i.txt %i\n" %(j, fl))
+        for r in printlist:
+                f.write("%i, %i, %f" %(r[0], r[1], r[2]) +"\n")
+        f.close()
+        pff.close()
+
+# Function to Replace Null/None Z with a value(99999) out of scope of Z = (-115,115)		
+def repnullwz(w):
+        x = int(w[0])
+        y = int(w[1])
+        z = (w[2])
+        if z == 'None':
+                z = unicode('99999', "utf-8")
+        else: z == z
+        return [x,y,z]
+
+alpha = 0.1  # Alpha Value constant 0.1, ran the code 4 times with 4 alpha values
+itr = int(sys.argv[2]) #Taking Argument 2 as number of iterations, here 50 iterations.
+inputfile = spark.read.text(sys.argv[1]).rdd.map(lambda w: w[0]).map(lambda w: w.split(", ")) # file read
+rfile = inputfile
+ifile = rfile.map(repnullwz) #function calling replace null with z values, assigning null Z to 99999, to count later.
+for j in range(itr):
+        nlist = ifile.filter(lambda x: float(x[2]) == 99999) # Counting number of Null Values.
+        nl =  len(nlist.collect()) #Storing null values to nlist.(nl)
+        flist = ifile.filter(lambda x: float(x[2]) > -100 and float(x[2]) < 100 or float(x[2]) == 99999) #filtering all values between -100 and 100, including nulls.
+        fl = len(flist.collect()) # To check the number of filtered values.
+        updlist = flist.collect() #Storing filtered values in flist(fl)
+        mlist = flist.map(updatenewwind) # Calculating for new Z
+        printing(mlist.collect(), j, nl, fl) # Printing function for Easy Viewing of output and using output file to generate heatmap in local
+        ifile = mlist #For next iteration
+spark.stop()
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Checking if all 50 iterations output have been generated.
+ma1306@ip-172-31-72-124:~/sparkas$
+
+---> ma1306@ip-172-31-72-124:~/sparkas/outputs$ ls *
+out_0.txt  output_0.txt
+
+alpha1:
+out_0.txt   out_12.txt  out_15.txt  out_18.txt  out_20.txt  out_23.txt  out_26.txt  out_29.txt  out_31.txt  out_34.txt  out_37.txt  out_3.txt   out_42.txt  out_45.txt  out_48.txt  out_5.txt  out_8.txt
+out_10.txt  out_13.txt  out_16.txt  out_19.txt  out_21.txt  out_24.txt  out_27.txt  out_2.txt   out_32.txt  out_35.txt  out_38.txt  out_40.txt  out_43.txt  out_46.txt  out_49.txt  out_6.txt  out_9.txt
+out_11.txt  out_14.txt  out_17.txt  out_1.txt   out_22.txt  out_25.txt  out_28.txt  out_30.txt  out_33.txt  out_36.txt  out_39.txt  out_41.txt  out_44.txt  out_47.txt  out_4.txt   out_7.txt  outalpha1.txt
+
+alpha2:
+out_0.txt   out_12.txt  out_15.txt  out_18.txt  out_20.txt  out_23.txt  out_26.txt  out_29.txt  out_31.txt  out_34.txt  out_37.txt  out_3.txt   out_42.txt  out_45.txt  out_48.txt  out_5.txt  out_8.txt
+out_10.txt  out_13.txt  out_16.txt  out_19.txt  out_21.txt  out_24.txt  out_27.txt  out_2.txt   out_32.txt  out_35.txt  out_38.txt  out_40.txt  out_43.txt  out_46.txt  out_49.txt  out_6.txt  out_9.txt
+out_11.txt  out_14.txt  out_17.txt  out_1.txt   out_22.txt  out_25.txt  out_28.txt  out_30.txt  out_33.txt  out_36.txt  out_39.txt  out_41.txt  out_44.txt  out_47.txt  out_4.txt   out_7.txt  outalpha2.txt
+
+alpha3:
+out_0.txt   out_12.txt  out_15.txt  out_18.txt  out_20.txt  out_23.txt  out_26.txt  out_29.txt  out_31.txt  out_34.txt  out_37.txt  out_3.txt   out_42.txt  out_45.txt  out_48.txt  out_5.txt  out_8.txt
+out_10.txt  out_13.txt  out_16.txt  out_19.txt  out_21.txt  out_24.txt  out_27.txt  out_2.txt   out_32.txt  out_35.txt  out_38.txt  out_40.txt  out_43.txt  out_46.txt  out_49.txt  out_6.txt  out_9.txt
+out_11.txt  out_14.txt  out_17.txt  out_1.txt   out_22.txt  out_25.txt  out_28.txt  out_30.txt  out_33.txt  out_36.txt  out_39.txt  out_41.txt  out_44.txt  out_47.txt  out_4.txt   out_7.txt  outalpha3.txt
+
+alpha4:
+out_0.txt   out_12.txt  out_15.txt  out_18.txt  out_20.txt  out_23.txt  out_26.txt  out_29.txt  out_31.txt  out_34.txt  out_37.txt  out_3.txt   out_42.txt  out_45.txt  out_48.txt  out_5.txt  out_8.txt
+out_10.txt  out_13.txt  out_16.txt  out_19.txt  out_21.txt  out_24.txt  out_27.txt  out_2.txt   out_32.txt  out_35.txt  out_38.txt  out_40.txt  out_43.txt  out_46.txt  out_49.txt  out_6.txt  out_9.txt
+out_11.txt  out_14.txt  out_17.txt  out_1.txt   out_22.txt  out_25.txt  out_28.txt  out_30.txt  out_33.txt  out_36.txt  out_39.txt  out_41.txt  out_44.txt  out_47.txt  out_4.txt   out_7.txt  outalpha4.txt
+ma1306@ip-172-31-72-124:~/sparkas/outputs$
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Heat Map generation code.
+---->
+
+import numpy as np
+import matplotlib.pyplot as plt
+
+
+
+def get_xyz_from_csv_file_np(csv_file_path): 
+    x, y, z = np.loadtxt(csv_file_path, delimiter=', ', dtype=np.int).T
+    plt_z = np.zeros((y.max()+1, x.max()+1))
+    plt_z[y, x] = z
+
+    return plt_z
+
+
+def draw_heatmap(plt_z, j):
+    # Generate y and x values from the dimension lengths
+    plt_y = np.arange(plt_z.shape[0])
+    plt_x = np.arange(plt_z.shape[1])
+    z_min = -100
+    z_max = 100 
+
+    plot_name = "demo"
+
+    color_map = plt.cm.gist_heat 
+    fig, ax = plt.subplots()
+    cax = ax.pcolor(plt_x, plt_y, plt_z, cmap=color_map, vmin=z_min, vmax=z_max)
+    ax.set_xlim(plt_x.min(), plt_x.max())
+    ax.set_ylim(plt_y.min(), plt_y.max())
+    fig.colorbar(cax).set_label(plot_name, rotation=270) 
+    ax.set_title(plot_name)  
+    ax.set_aspect('equal')
+    #return figure
+    figure = plt.gcf()
+    fname = "out_%i.png" %j
+    plt.savefig(fname)
+
+for k in range(0,50):
+    fname = "out_%i.txt" %k
+    res = get_xyz_from_csv_file_np(fname)
+    draw_heatmap(res, k)
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
